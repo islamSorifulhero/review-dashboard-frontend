@@ -1,42 +1,44 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import cookieParser from "cookie-parser";
+import { config } from "./config";
+import authRoutes from "./routes/auth";
+import submissionRoutes from "./routes/submissions";
+import { errorHandler, notFound } from "./middleware/error";
 
-export class ApiError extends Error {
-  constructor(public status: number, message: string, public fieldErrors?: Record<string, string[]>) {
-    super(message);
-  }
-}
+export const app = express();
 
-export async function api<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_URL}${path}`, {
-      ...init,
-      credentials: "include", // send the httpOnly auth cookie
-      headers: { "Content-Type": "application/json", ...init.headers },
-    });
-  } catch {
-    throw new ApiError(0, "Cannot reach the server. Check your connection and try again.");
-  }
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new ApiError(res.status, data?.message ?? "Something went wrong", data?.fieldErrors);
-  return data as T;
-}
+app.set("trust proxy", 1);
+app.use(helmet());
 
-export type Role = "STUDENT" | "MENTOR";
-export type Status = "PENDING" | "APPROVED" | "REJECTED";
-export type User = { id: string; name: string; email: string; role: Role };
-export type Submission = {
-  id: string;
-  projectName: string;
-  repoUrl: string;
-  liveUrl: string | null;
-  description: string;
-  status: Status;
-  createdAt: string;
-  student?: { id: string; name: string; email: string };
-};
-export type Stats = { total: number; pending: number; approved: number; rejected: number };
-export type ListResponse = {
-  items: Submission[];
-  meta: { page: number; limit: number; total: number; totalPages: number };
-};
+// CORS Config: Localhost এবং Vercel Live Frontend দুটোকেই এলাউ করবে
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "https://review-dashboard-frontend.vercel.app",
+  config.CLIENT_URL,
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, true); // Fallback for maximum stability
+      }
+    },
+    credentials: true,
+  })
+);
+
+app.use(express.json({ limit: "10kb" }));
+app.use(cookieParser());
+
+app.get("/api/health", (_req, res) => res.json({ ok: true }));
+app.use("/api/auth", authRoutes);
+app.use("/api/submissions", submissionRoutes);
+
+app.use(notFound);
+app.use(errorHandler);
